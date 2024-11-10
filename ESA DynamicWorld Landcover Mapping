@@ -1,0 +1,61 @@
+// Load the Dynamic World classification for a specific Sentinel-2 image
+var startDate = '2024-10-15';
+var endDate = '2024-11-05';
+var geometry = ee.Geometry.Point([-12.30705, 14.81403]);
+
+var s2 = ee.ImageCollection('COPERNICUS/S2_HARMONIZED')
+    .filterDate(startDate, endDate)
+    .filterBounds(geometry)
+    .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 35));
+
+// Select the first Sentinel-2 image in the filtered collection
+var s2Image = ee.Image(s2.first());
+Map.centerObject(geometry, 13);
+
+// Get the Dynamic World classification for the selected image
+var imageId = s2Image.get('system:index');
+var dw = ee.ImageCollection('GOOGLE/DYNAMICWORLD/V1')
+    .filter(ee.Filter.eq('system:index', imageId));
+var dwImage = ee.Image(dw.first());
+
+// Select the label band and visualize it
+var classification = dwImage.select('label');
+var dwVisParams = {
+    min: 0,
+    max: 8,
+    palette: ['#419BDF', '#397D49', '#88B053', '#7A87C6',
+              '#E49635', '#DFC35A', '#C4281B', '#A59B8F', '#B39FE1']
+};
+Map.addLayer(classification, dwVisParams, 'Classified Image');
+
+// Define land cover labels as an Earth Engine List
+var landCoverLabels = ee.List([
+  'water', 'trees', 'grass', 'flooded_vegetation', 'crops', 
+  'shrub_and_scrub', 'built', 'bare', 'snow_and_ice'
+]);
+
+// Define your ROI interactively or as a fixed polygon (adjust as needed)
+// Draw ROI in the viewer and uncomment this line to get the drawn geometry
+// var roi = Map.drawingTools().layers().get(0).toGeometry(); 
+
+// Convert the classification to vector format
+var vectors = classification.reduceToVectors({
+  geometry: roi,  // Set the region of interest (ROI)
+  scale: 10,      // Set scale according to the resolution needed
+  geometryType: 'polygon',
+  maxPixels: 1e8
+});
+
+// Map over each vector feature to add the land use label as an attribute
+vectors = vectors.map(function(feature) {
+  var classValue = feature.get('label'); // Get the class value
+  var label = landCoverLabels.get(classValue); // Get the label
+  return feature.set('land_use_label', label); // Add the label as an attribute
+});
+
+// Export the result as a shapefile or GeoJSON
+Export.table.toDrive({
+  collection: vectors,
+  description: 'DynamicWorld_Classification_WithLabels',
+  fileFormat: 'GeoJSON' // Change to 'SHP' for Shapefile format
+});
